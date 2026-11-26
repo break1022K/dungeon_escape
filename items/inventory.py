@@ -29,6 +29,7 @@ items/inventory.py
         print(e)          # 턴을 소모하지 않고 다시 고르게 하면 된다
 """
 
+from core.ui import josa
 from items.item import (
     Item,
     Weapon,
@@ -145,7 +146,7 @@ class Inventory:
         for i, slot in enumerate(self.__slots):
             if slot.item.name == name:
                 return i
-        raise ItemNotFoundError(f"가방에 {name}이(가) 없다!")
+        raise ItemNotFoundError(f"가방에 {josa(name, '이/가')} 없다!")
 
     # -----------------------------------------------------------------------
     # 넣기 / 빼기
@@ -183,7 +184,7 @@ class Inventory:
 
         # 2) 공간 확인을 '먼저' 해서, 일부만 들어가는 상황을 막는다
         if not self.can_add(item, count):
-            raise InventoryFullError(f"가방이 가득 차서 {item.name}을(를) 넣을 수 없다!")
+            raise InventoryFullError(f"가방이 가득 차서 {josa(item.name, '을/를')} 넣을 수 없다!")
 
         # 3) 실제로 넣기
         remaining = count
@@ -203,7 +204,7 @@ class Inventory:
             remaining -= put
 
         suffix = f" x{count}" if item.stackable else ""
-        return f"{item.name}{suffix}을(를) 가방에 넣었다."
+        return f"{item.name}{josa(suffix, '을/를')} 가방에 넣었다."
 
     def remove(self, index, count=1):
         """
@@ -214,7 +215,7 @@ class Inventory:
         if count < 1:
             raise ValueError("뺄 개수는 1 이상이어야 합니다.")
         if count > slot.count:
-            raise ItemNotFoundError(f"{slot.item.name}은(는) {slot.count}개밖에 없다!")
+            raise ItemNotFoundError(f"{josa(slot.item.name, '은/는')} {slot.count}개밖에 없다!")
 
         slot.count -= count
         if slot.count == 0:
@@ -256,14 +257,14 @@ class Inventory:
         """
         weapon = getattr(target, "weapon", None)
         if weapon is None:
-            raise ItemUseError(f"{target.name}은(는) 장착한 무기가 없다!")
+            raise ItemUseError(f"{josa(target.name, '은/는')} 장착한 무기가 없다!")
         if self.is_full():
             # 벗기기 '전에' 확인해야 무기가 허공으로 사라지지 않는다
             raise InventoryFullError("가방이 가득 차서 무기를 벗을 수 없다!")
 
         weapon.unequip(target)
         self.add(weapon)
-        return f"{target.name}은(는) {weapon.name}을(를) 벗어 가방에 넣었다. (ATK {target.atk})"
+        return f"{josa(target.name, '은/는')} {josa(weapon.name, '을/를')} 벗어 가방에 넣었다. (ATK {target.atk})"
 
     # -----------------------------------------------------------------------
     # 정리 / 출력
@@ -307,31 +308,11 @@ class Inventory:
 #   것일 뿐 동작에는 문제없다.
 # ===========================================================================
 if __name__ == "__main__":
-    from core.unit import Unit
+    from characters import Warrior, Mage
     from items.item import create_item
 
-    # 캐릭터 담당 코드가 아직 없어도 테스트할 수 있도록 간단한 가짜 캐릭터를 만든다.
-    class Warrior(Unit):
-        def __init__(self, name):
-            super().__init__(name, hp=100, atk=12)
-            self.max_hp = 100
-            self.weapon = None
-
-        def attack(self, target):
-            target.take_damage(self.atk)
-
-    class Mage(Unit):
-        def __init__(self, name):
-            super().__init__(name, hp=70, atk=15)
-            self.max_hp = 70
-            self.mp, self.max_mp = 10, 50
-            self.weapon = None
-
-        def attack(self, target):
-            target.take_damage(self.atk)
-
-    mole = Warrior("두더지 전사 두두")
-    owl = Mage("부엉이 마법사 부엉")
+    mole = Warrior("두두")
+    owl = Mage("흙흙")
     bag = Inventory()
 
     print(bag.add(create_item("small_berry"), 3))
@@ -339,7 +320,7 @@ if __name__ == "__main__":
     print(bag.add(create_item("phoenix_feather")))
     print(bag.add(create_item("steel_claw")))
     print(bag.add(create_item("mithril_claw")))
-    print(bag.add(create_item("feather_staff")))
+    print(bag.add(create_item("earth_staff")))
     bag.show()
 
     print("\n--- 오크에게 맞았다! ---")
@@ -347,7 +328,7 @@ if __name__ == "__main__":
     print(bag.use(bag.find_index("작은 회복 열매"), mole))
 
     print("\n--- 체력이 가득한데 물약 사용 (실패해야 함) ---")
-    mole.take_damage(-100)   # 테스트용 풀피 만들기
+    mole.heal(999)
     try:
         bag.use(bag.find_index("작은 회복 열매"), mole)
     except ItemUseError as e:
@@ -357,11 +338,12 @@ if __name__ == "__main__":
     print(bag.use(bag.find_index("강철 발톱 장갑"), mole))
     print(bag.use(bag.find_index("미스릴 굴착 발톱"), mole))
     try:
-        bag.use(bag.find_index("부엉이 깃털 지팡이"), mole)   # 직업 불일치
+        bag.use(bag.find_index("지렁이 뿌리 지팡이"), mole)   # 직업 불일치
     except ItemUseError as e:
         print("⚠", e)
 
     print("\n--- 마나 회복 / 부활 ---")
+    owl.mp = 10
     print(bag.use(bag.find_index("마나 이슬"), owl))
     owl.take_damage(999)     # 오우거의 일격!
     print(f"{owl.name} 쓰러짐? {not owl.is_alive()}")

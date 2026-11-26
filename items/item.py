@@ -4,53 +4,27 @@ items/item.py
 던전 탈출(Dungeon Escape) - 아이템 모듈  (③ 아이템·인벤토리 담당)
 
 [세계관]
-    동물들이 사는 판타지 왕국. 두더지 전사, 부엉이 마법사, 여우 궁수가
-    오크·고블린·오우거가 득실대는 던전을 탈출한다.
-    포켓몬스터처럼 '턴제 전투' 중에 가방(인벤토리)을 열어 아이템을 쓸 수 있다.
+    두더지 왕국의 원정대(발톱 전사, 흙마법사, 앞니 투척수)가
+    고블린·오크·오우거가 득실대는 던전을 탈출한다.
+    턴제 전투 중에 가방(인벤토리)을 열어 아이템을 쓸 수 있다.
 
 [이 파일에 들어있는 것]
     Item        : 모든 아이템의 부모 클래스 (추상 클래스 역할)
     Potion      : HP 회복 물약 (소모품, 겹쳐 쌓기 가능)
-      ├ ManaPotion : MP 회복 물약 (부엉이 마법사 같은 MP 캐릭터용)
-      └ Revive     : 쓰러진 동료를 되살리는 부활 아이템 (포켓몬의 '기력의 조각')
+      ├ ManaPotion : MP 회복 물약
+      └ Revive     : 쓰러진 캐릭터를 되살리는 부활 아이템
+                     (전투에서 쓰러지면 가방에 있을 때 자동 사용)
     Weapon      : 장착하면 공격력(atk)이 오르는 무기 (직업 제한 가능)
-    create_item(): 아이템 ID로 새 아이템을 만들어 주는 함수 (상점·몬스터 드롭용)
+    create_item(): 아이템 ID로 새 아이템을 만들어 주는 함수 (상점·시작 아이템용)
 
-[다른 팀과의 약속 (인터페이스)]
-    아이템은 core.unit.Unit 을 상속한 캐릭터에게 사용된다.
-    Unit 은 기본으로 name, hp, atk, take_damage(), is_alive() 만 가지고 있으므로
-    아이템이 제대로 동작하려면 ① 캐릭터 담당이 아래 속성을 만들어 주면 좋다.
-        - max_hp : 최대 체력  (없으면 회복량에 상한이 없음)
-        - weapon : 현재 장착한 무기, 처음에는 None  (없으면 장착 시 자동 생성)
-        - mp, max_mp : 마나 (ManaPotion 을 쓰려면 필요)
-    ※ 어떤 속성이 없어도 프로그램이 죽지 않도록 getattr() 로 안전하게 확인한다.
-
-[HP 변경 규칙]
-    Unit 의 __hp 는 private(이름 맹글링) 이고 "HP는 take_damage()로만 변경" 규칙이 있다.
-    그래서 회복은 '음수 데미지'로 처리한다.
-        target.take_damage(-30)  →  __hp = max(0, hp - (-30)) = hp + 30
-    규칙을 어기지 않으면서 회복할 수 있는 방법이다.
-    (팀 합의로 Unit 에 heal() 메서드가 생기면 _restore_hp() 한 곳만 고치면 된다.)
+[캐릭터에게 기대하는 것 (core.unit.Unit + characters.Player)]
+    name, hp, max_hp, atk, is_alive(), heal(amount)
+    weapon (장착 중인 무기, 처음엔 None)
+    mp, max_mp, restore_mp(amount)  (ManaPotion 용)
 """
 
-# ---------------------------------------------------------------------------
-# 사용자 정의 예외 가져오기
-# ---------------------------------------------------------------------------
-# 예외는 원래 core/exceptions.py(공통 파일)에 모아두기로 했다.
-# 하지만 각 팀이 동시에 작업하다 보면 아직 그 파일에 우리가 쓸 예외가 없을 수 있다.
-# 그래서 먼저 core 에서 가져와 보고, 없으면(ImportError) 여기서 임시로 정의한다.
-# → 팀 합의 후 core/exceptions.py 에 아래 세 클래스를 추가하면 그쪽 것이 사용된다.
-try:
-    from core.exceptions import ItemUseError, InventoryFullError, ItemNotFoundError
-except ImportError:
-    class ItemUseError(Exception):
-        """아이템을 지금 사용할 수 없을 때 (예: 체력이 이미 가득, 직업이 맞지 않는 무기)"""
-
-    class InventoryFullError(Exception):
-        """인벤토리(가방)에 빈 칸이 없을 때"""
-
-    class ItemNotFoundError(Exception):
-        """없는 칸 번호를 고르거나, 없는 아이템을 찾을 때"""
+from core.ui import josa
+from core.exceptions import ItemUseError, InventoryFullError, ItemNotFoundError
 
 
 # ---------------------------------------------------------------------------
@@ -58,11 +32,11 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # 무기의 직업 제한은 '클래스 이름(문자열)'으로 검사한다.
 # characters/player.py 의 클래스 이름(Warrior, Mage, Archer)과 반드시 같아야 한다!
-# 화면에 보여줄 때는 아래 한글 이름을 사용한다. (캐릭터 담당과 이름 맞추기)
+# 화면 표시 이름은 characters/player.py 의 job 과 같게 맞춘다.
 CLASS_DISPLAY_NAMES = {
-    "Warrior": "두더지 전사",   # 근거리 공격
-    "Mage": "부엉이 마법사",    # 마법 공격 (MP 사용)
-    "Archer": "여우 궁수",      # 원거리 공격
+    "Warrior": "발톱 전사",     # 근거리, 튼튼함
+    "Mage": "흙마법사",         # 마법 공격 (MP 사용)
+    "Archer": "앞니 투척수",    # 앞니 투척
 }
 
 
@@ -70,20 +44,9 @@ CLASS_DISPLAY_NAMES = {
 # 내부 도우미 함수 (이름 앞의 _ 는 "이 모듈 안에서만 쓰는 함수"라는 관례)
 # ---------------------------------------------------------------------------
 def _restore_hp(target, amount):
-    """
-    대상의 HP를 amount 만큼 회복시키고, '실제로 회복된 양'을 돌려준다.
-
-    - max_hp 속성이 있으면 최대 체력을 넘지 않도록 회복량을 잘라낸다.
-    - 회복은 take_damage(음수) 로 처리한다. (파일 맨 위 [HP 변경 규칙] 참고)
-    """
-    max_hp = getattr(target, "max_hp", None)   # 속성이 없으면 None
-    if max_hp is not None:
-        amount = min(amount, max_hp - target.hp)  # 넘치는 만큼 잘라내기
-    amount = max(0, amount)                       # 음수가 되지 않도록 방어
-
-    if amount > 0:
-        target.take_damage(-amount)               # 음수 데미지 = 회복
-    return amount
+    """대상의 HP를 amount 만큼 회복시키고, '실제로 회복된 양'을 돌려준다.
+    (최대 HP 제한은 Unit.heal() 이 처리한다)"""
+    return target.heal(max(0, amount))
 
 
 def _hp_text(target):
@@ -187,7 +150,7 @@ class Potion(Item):
         자식 클래스(ManaPotion, Revive)는 이 메서드만 바꿔서 조건을 다르게 한다.
         """
         if not target.is_alive():
-            raise ItemUseError(f"{target.name}은(는) 쓰러져 있어서 {self.name}을(를) 쓸 수 없다!")
+            raise ItemUseError(f"{josa(target.name, '은/는')} 쓰러져 있어서 {josa(self.name, '을/를')} 쓸 수 없다!")
 
         max_hp = getattr(target, "max_hp", None)
         if max_hp is not None and target.hp >= max_hp:
@@ -197,7 +160,7 @@ class Potion(Item):
         """HP를 회복시키고 결과 메시지를 돌려준다."""
         self.check_usable(target)              # 못 쓰면 여기서 예외 발생 → 아래 실행 안 됨
         healed = _restore_hp(target, self.amount)
-        return (f"{target.name}은(는) {self.name}을(를) 사용했다! "
+        return (f"{josa(target.name, '은/는')} {josa(self.name, '을/를')} 사용했다! "
                 f"HP가 {healed} 회복되었다. ({_hp_text(target)})")
 
     def __str__(self):
@@ -209,7 +172,7 @@ class Potion(Item):
 # ---------------------------------------------------------------------------
 class ManaPotion(Potion):
     """
-    MP를 회복시키는 물약. 부엉이 마법사처럼 mp 속성이 있는 캐릭터만 쓸 수 있다.
+    MP를 회복시키는 물약. 흙마법사처럼 mp 속성이 있는 캐릭터만 쓸 수 있다.
 
     대상 캐릭터에게 필요한 것 (캐릭터 담당과 약속)
         - mp, max_mp 속성
@@ -218,11 +181,11 @@ class ManaPotion(Potion):
 
     def check_usable(self, target):
         if not target.is_alive():
-            raise ItemUseError(f"{target.name}은(는) 쓰러져 있어서 {self.name}을(를) 쓸 수 없다!")
+            raise ItemUseError(f"{josa(target.name, '은/는')} 쓰러져 있어서 {josa(self.name, '을/를')} 쓸 수 없다!")
 
         # hasattr(객체, "속성이름") : 그 속성이 있는지 True/False 로 알려준다
         if not hasattr(target, "mp"):
-            raise ItemUseError(f"{target.name}은(는) 마나를 쓰지 않는다. {self.name}은(는) 효과가 없다!")
+            raise ItemUseError(f"{josa(target.name, '은/는')} 마나를 쓰지 않는다. {josa(self.name, '은/는')} 효과가 없다!")
 
         max_mp = getattr(target, "max_mp", None)
         if max_mp is not None and target.mp >= max_mp:
@@ -243,7 +206,7 @@ class ManaPotion(Potion):
         restored = target.mp - before
         max_mp = getattr(target, "max_mp", None)
         mp_text = f"MP {target.mp}" if max_mp is None else f"MP {target.mp}/{max_mp}"
-        return (f"{target.name}은(는) {self.name}을(를) 사용했다! "
+        return (f"{josa(target.name, '은/는')} {josa(self.name, '을/를')} 사용했다! "
                 f"MP가 {restored} 회복되었다. ({mp_text})")
 
     def __str__(self):
@@ -271,7 +234,7 @@ class Revive(Potion):
 
     def check_usable(self, target):
         if target.is_alive():
-            raise ItemUseError(f"{target.name}은(는) 아직 쓰러지지 않았다! {self.name}은(는) 쓰러진 동료에게만 쓸 수 있다.")
+            raise ItemUseError(f"{josa(target.name, '은/는')} 아직 쓰러지지 않았다! {josa(self.name, '은/는')} 쓰러진 동료에게만 쓸 수 있다.")
 
     def use(self, target):
         self.check_usable(target)
@@ -279,11 +242,11 @@ class Revive(Potion):
         # max_hp 가 있으면 비율로, 없으면 고정 회복량(amount)으로 되살린다.
         # int() 결과가 0 이 되면 부활이 안 되므로 최소 1 을 보장한다.
         heal = max(1, int(max_hp * self.ratio)) if max_hp is not None else self.amount
-        _restore_hp(target, heal)   # HP 0 → take_damage(-heal) → HP heal
-        return f"{self.name}의 힘으로 {target.name}이(가) 다시 일어났다! ({_hp_text(target)})"
+        _restore_hp(target, heal)   # HP 0 → heal → 부활
+        return f"{self.name}의 힘으로 {josa(target.name, '이/가')} 다시 일어났다! ({_hp_text(target)})"
 
     def __str__(self):
-        return (f"{self.name} ({self.price}G) - 쓰러진 동료를 최대 HP의 "
+        return (f"{self.name} ({self.price}G) - 쓰러지면 자동 사용, 최대 HP의 "
                 f"{int(self.ratio * 100)}%로 부활 | {self.description}")
 
 
@@ -298,7 +261,7 @@ class Weapon(Item):
     추가 속성
         atk_bonus       : 올려주는 공격력
         allowed_classes : 장착 가능한 직업 클래스 이름들의 튜플. None 이면 모든 직업 가능
-                          예) ("Warrior",)  → 두더지 전사만 장착 가능
+                          예) ("Warrior",)  → 발톱 전사만 장착 가능
 
     장착 방식
         target.weapon 에 무기를 저장하고 target.atk 를 올린다.
@@ -330,7 +293,7 @@ class Weapon(Item):
         return any(cls.__name__ in self.allowed_classes for cls in type(target).__mro__)
 
     def allowed_text(self):
-        """'두더지 전사, 여우 궁수' 처럼 장착 가능 직업을 한글로 돌려준다."""
+        """'발톱 전사, 앞니 투척수' 처럼 장착 가능 직업을 한글로 돌려준다."""
         if self.allowed_classes is None:
             return "모든 직업"
         return ", ".join(CLASS_DISPLAY_NAMES.get(c, c) for c in self.allowed_classes)
@@ -342,13 +305,13 @@ class Weapon(Item):
         장착할 수 없으면 ItemUseError 발생 → 아무것도 바뀌지 않는다.
         """
         if not target.is_alive():
-            raise ItemUseError(f"{target.name}은(는) 쓰러져 있어서 무기를 장착할 수 없다!")
+            raise ItemUseError(f"{josa(target.name, '은/는')} 쓰러져 있어서 무기를 장착할 수 없다!")
         if not self.can_equip(target):
-            raise ItemUseError(f"{self.name}은(는) {self.allowed_text()}만 장착할 수 있다!")
+            raise ItemUseError(f"{josa(self.name, '은/는')} {self.allowed_text()}만 장착할 수 있다!")
 
         old_weapon = getattr(target, "weapon", None)
         if old_weapon is self:
-            raise ItemUseError(f"{target.name}은(는) 이미 {self.name}을(를) 장착하고 있다!")
+            raise ItemUseError(f"{josa(target.name, '은/는')} 이미 {josa(self.name, '을/를')} 장착하고 있다!")
 
         if old_weapon is not None:
             old_weapon.unequip(target)    # 옛 무기의 공격력 보너스를 먼저 빼준다
@@ -360,15 +323,15 @@ class Weapon(Item):
     def unequip(self, target):
         """target 이 끼고 있는 이 무기를 벗긴다. (공격력 원상복구)"""
         if getattr(target, "weapon", None) is not self:
-            raise ItemUseError(f"{target.name}은(는) {self.name}을(를) 장착하고 있지 않다!")
+            raise ItemUseError(f"{josa(target.name, '은/는')} {josa(self.name, '을/를')} 장착하고 있지 않다!")
         target.atk -= self.atk_bonus
         target.weapon = None
 
     def equip_message(self, target, old_weapon):
         """장착 결과 메시지를 만든다. (use() 와 Inventory.use() 가 같이 사용)"""
-        msg = f"{target.name}은(는) {self.name}을(를) 장착했다! 공격력 +{self.atk_bonus} (ATK {target.atk})"
+        msg = f"{josa(target.name, '은/는')} {josa(self.name, '을/를')} 장착했다! 공격력 +{self.atk_bonus} (ATK {target.atk})"
         if old_weapon is not None:
-            msg += f"\n  └ 사용하던 {old_weapon.name}은(는) 가방에 넣었다."
+            msg += f"\n  └ 사용하던 {josa(old_weapon.name, '은/는')} 가방에 넣었다."
         return msg
 
     def use(self, target):
@@ -401,29 +364,29 @@ _ITEM_FACTORIES = {
     "mana_dew": lambda: ManaPotion(
         "마나 이슬", 40, 30, "달빛 아래 맺힌 이슬. 마력이 차오른다"),
     "phoenix_feather": lambda: Revive(
-        "불사조 깃털", 200, 0.5, "쓰러진 동료를 따뜻한 불꽃으로 감싸 되살린다"),
+        "불사조 깃털", 150, 0.5, "쓰러지는 순간 따뜻한 불꽃이 감싸 되살려 준다"),
 
     # ---- 공용 무기 ----
     "rusty_dagger": lambda: Weapon(
-        "녹슨 단검", 20, 3, None, "던전 입구에 굴러다니던 낡은 단검"),
+        "녹슨 단검", 30, 3, None, "던전 입구에 굴러다니던 낡은 단검"),
 
-    # ---- 두더지 전사 (근거리) ----
+    # ---- 발톱 전사 ----
     "steel_claw": lambda: Weapon(
-        "강철 발톱 장갑", 100, 8, ["Warrior"], "땅굴을 파던 발톱에 강철을 덧씌웠다"),
+        "강철 발톱 장갑", 90, 6, ["Warrior"], "땅굴을 파던 발톱에 강철을 덧씌웠다"),
     "mithril_claw": lambda: Weapon(
-        "미스릴 굴착 발톱", 250, 15, ["Warrior"], "오우거의 갑옷도 파고드는 전설의 발톱"),
+        "미스릴 굴착 발톱", 220, 12, ["Warrior"], "오우거의 갑옷도 파고드는 전설의 발톱"),
 
-    # ---- 부엉이 마법사 (마법) ----
-    "feather_staff": lambda: Weapon(
-        "부엉이 깃털 지팡이", 120, 10, ["Mage"], "현자 부엉이의 깃털이 달린 지팡이"),
-    "starlight_staff": lambda: Weapon(
-        "별빛 수정 지팡이", 280, 18, ["Mage"], "밤하늘의 별빛을 담은 수정 지팡이"),
+    # ---- 흙마법사 ----
+    "earth_staff": lambda: Weapon(
+        "지렁이 뿌리 지팡이", 90, 6, ["Mage"], "땅속 깊은 뿌리로 만든 마력 지팡이"),
+    "crystal_staff": lambda: Weapon(
+        "수정 동굴 지팡이", 220, 12, ["Mage"], "동굴 깊은 곳의 수정이 박힌 지팡이"),
 
-    # ---- 여우 궁수 (원거리) ----
-    "fox_bow": lambda: Weapon(
-        "여우 꼬리 단궁", 110, 9, ["Archer"], "가볍고 빠른 여우족 전통 활"),
-    "wind_bow": lambda: Weapon(
-        "바람 정령 장궁", 260, 16, ["Archer"], "화살이 바람을 타고 고블린을 꿰뚫는다"),
+    # ---- 앞니 투척수 ----
+    "leather_glove": lambda: Weapon(
+        "가죽 투척 장갑", 90, 6, ["Archer"], "앞니를 더 멀리, 더 세게 던질 수 있다"),
+    "wind_sling": lambda: Weapon(
+        "바람 정령 투석끈", 220, 12, ["Archer"], "던진 앞니가 바람을 타고 오크를 꿰뚫는다"),
 }
 
 
